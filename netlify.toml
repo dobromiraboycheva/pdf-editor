@@ -1,0 +1,11 @@
+# Netlify config — alternative free host to Vercel.
+# Drag the `dist/` folder to app.netlify.com/drop, or connect this repo.
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# SPA fallback — hash router means this is belt-and-suspenders, but harmless.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

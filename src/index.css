@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --surface: #ffffff;
+    --surface-muted: #f6f4f2;
+    --ink: #1d2126;
+    --ink-muted: #6b7278;
+    --border: rgba(0, 0, 0, 0.05);
+  }
+  .dark {
+    --surface: #16181d;
+    --surface-muted: #1f2228;
+    --ink: #e8eaed;
+    --ink-muted: #9aa0a6;
+    --border: rgba(255, 255, 255, 0.08);
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-surface text-ink font-sans;
+  }
+  * {
+    -webkit-font-smoothing: antialiased;
+  }
+}

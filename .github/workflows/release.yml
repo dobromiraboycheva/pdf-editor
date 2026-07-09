@@ -1,0 +1,195 @@
+# Builds installers for every platform on a version-tag push (v*) and creates a GitHub release.
+#
+# Outputs:
+#   - macOS:   .dmg + .app          (universal — Intel + Apple Silicon)
+#   - Windows: .msi + .exe (NSIS)
+#   - Linux:   .AppImage + .deb
+#   - Android: .apk                 (uploaded as a workflow artifact + attached to the release)
+#
+# To ship signed macOS builds, set these repo secrets (all optional — omit for an unsigned build):
+#   APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
+#   APPLE_ID, APPLE_PASSWORD (app-specific), APPLE_TEAM_ID
+#
+# To ship a signed release APK (recommended for distribution), set:
+#   ANDROID_KEYSTORE (base64 .jks/.keystore), ANDROID_KEYSTORE_PASSWORD,
+#   ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+# Without these the APK is built with the debug signing key (installable, but not upgrade-safe).
+#
+# Windows signing is intentionally left unsigned by default (SmartScreen warns for new
+# publishers regardless of an OV cert). Add Azure Trusted Signing / SSL.com later.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# Allow the workflow to create/update GitHub Releases and upload assets.
+permissions:
+  contents: write
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Desktop: macOS (universal), Windows, Linux — via tauri-action.
+  # ---------------------------------------------------------------------------
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'macos-latest'
+            args: '--target universal-apple-darwin'
+          - platform: 'ubuntu-22.04'
+            args: ''
+          - platform: 'windows-latest'
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install Linux deps
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev
+
+      - name: Install npm deps
+        run: npm ci
+
+      - name: Generate app icons
+        run: npx @tauri-apps/cli icon src-tauri/icons/icon.png
+
+      - name: Build & release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # NOTE: macOS/Windows builds are intentionally UNSIGNED for now (no paid
+          # certificates). Apple signing env vars are deliberately omitted so
+          # tauri-action doesn't attempt codesigning with empty secrets (which fails).
+          # To ship signed macOS builds later, add these back and set the repo secrets:
+          #   APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
+          #   APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'PDF Editor ${{ github.ref_name }}'
+          releaseBody: |
+            Local-first PDF editor. Files never leave your device.
+
+            Downloads:
+            - **Windows**: `.msi` or `.exe`
+            - **macOS**:   `.dmg` (universal, Intel + Apple Silicon)
+            - **Linux**:   `.AppImage` or `.deb`
+            - **Android**: `.apk`
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+  # ---------------------------------------------------------------------------
+  # Android: build a .apk with the Tauri CLI directly.
+  # tauri-action's Android support is still maturing, so we drive the CLI by hand.
+  # ---------------------------------------------------------------------------
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: |
+          sdkmanager --install "ndk;26.1.10909125"
+          echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> "$GITHUB_ENV"
+
+      - name: Install Rust toolchain (Android targets)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install npm deps
+        run: npm ci
+
+      - name: Generate app icons
+        run: npx @tauri-apps/cli icon src-tauri/icons/icon.png
+
+      # `gen/android` is git-ignored (see src-tauri/.gitignore), so initialize it here.
+      # `init` is idempotent; the guard keeps re-runs fast if the folder is ever committed.
+      - name: Initialize Android project
+        run: |
+          if [ ! -d "src-tauri/gen/android" ]; then
+            npx @tauri-apps/cli android init
+          fi
+
+      - name: Build APK
+        run: npx @tauri-apps/cli android build --apk
+        env:
+          NDK_HOME: ${{ env.NDK_HOME }}
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_NDK_ROOT }}
+
+      - name: Locate APK
+        id: apk
+        run: |
+          APK=$(find src-tauri/gen/android -name "*.apk" -path "*release*" | head -n1)
+          if [ -z "$APK" ]; then APK=$(find src-tauri/gen/android -name "*.apk" | head -n1); fi
+          echo "path=$APK" >> "$GITHUB_OUTPUT"
+          echo "Found APK: $APK"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdf-editor-android-apk
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
+
+      # Attach the APK to the (draft) GitHub release created by the desktop job.
+      - name: Attach APK to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.apk.outputs.path }}
+          tag_name: ${{ github.ref_name }}
+          draft: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

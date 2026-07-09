@@ -1,0 +1,39 @@
+/**
+ * Styles for the pdf.js text layer overlaid on top of the rendered PDF canvas
+ * in the Edit tool. Positions invisible text spans so users can select and
+ * copy the underlying PDF text (Ctrl+C / Cmd+C).
+ *
+ * The container is scaled by pdf.js via CSS custom property `--scale-factor`
+ * (set on the container's inline style). Sibling text spans are positioned
+ * absolutely by pdf.js at render time.
+ */
+.pdfTextLayer {
+  position: absolute;
+  overflow: hidden;
+  opacity: 0.25;
+  line-height: 1;
+  /* pdf.js reads this at layout time to scale spans correctly. */
+  --scale-factor: 1;
+  /* Container itself never blocks pointer events — only spans can. */
+  pointer-events: none;
+}
+
+.pdfTextLayer > span,
+.pdfTextLayer > br {
+  position: absolute;
+  color: transparent;
+  cursor: text;
+  white-space: pre;
+  transform-origin: 0% 0%;
+  /* Off by default so clicks pass through to Konva shapes. */
+  pointer-events: none;
+}
+
+/* Enabled when parent has data-selectable="true" (set by JS when Select tool active). */
+.pdfTextLayer[data-selectable="true"] > span {
+  pointer-events: auto;
+}
+
+.pdfTextLayer ::selection {
+  background: rgba(10, 102, 255, 0.3);
+}
