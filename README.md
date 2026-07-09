@@ -64,6 +64,10 @@ GitHub Actions builds macOS + Windows + Linux + Android installers and attaches 
 - AI features (Summarize/Translate) are optional and use a key/provider you choose;
   the free translation provider (MyMemory) and the local extractive summarizer need no key.
 
+## Security
+
+See [SECURITY.md](./SECURITY.md) for the security model and how to report vulnerabilities.
+
 ## License
 
 MIT © 2026 Dobromira Boycheva

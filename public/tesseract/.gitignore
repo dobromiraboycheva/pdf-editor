@@ -1,0 +1,7 @@
+# These files are vendored from node_modules / a CDN by the build scripts:
+#   - worker.min.js + tesseract-core*  <- `node scripts/copy-tesseract-assets.mjs`
+#   - lang/*.traineddata.gz            <- `bash scripts/fetch-tesseract-lang.sh`
+# They are large binaries and should not be committed. See BUILD.md.
+worker.min.js
+tesseract-core*
+lang/*.traineddata.gz

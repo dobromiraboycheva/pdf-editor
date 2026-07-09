@@ -8,12 +8,64 @@ export interface OcrOptions {
 const RENDER_SCALE = 2;
 
 /**
+ * Base URL for the vendored Tesseract assets served from `public/tesseract/`.
+ * Worker + wasm core are copied here at build time (scripts/copy-tesseract-assets.mjs);
+ * language traineddata is placed under `${LOCAL_BASE}/lang` by
+ * scripts/fetch-tesseract-lang.sh. When any of these are missing we fall back to
+ * the CDN so OCR keeps working (see createOcrWorker).
+ */
+const LOCAL_BASE = '/tesseract';
+
+let warnedLocalFallback = false;
+
+type TesseractModule = typeof import('tesseract.js');
+type TesseractWorker = Awaited<ReturnType<TesseractModule['createWorker']>>;
+
+/**
+ * Create a Tesseract worker, preferring the locally vendored worker/core/lang
+ * assets for privacy + offline use. If the local assets are missing (not
+ * vendored) and worker init fails, fall back once to tesseract.js's default CDN
+ * paths so OCR still works.
+ */
+async function createOcrWorker(
+  createWorker: TesseractModule['createWorker'],
+  language: OcrOptions['language'],
+): Promise<TesseractWorker> {
+  try {
+    // tesseract.js v7 signature: createWorker(langs, oem, options)
+    return await createWorker(language, undefined, {
+      workerPath: `${LOCAL_BASE}/worker.min.js`,
+      // Directory containing tesseract-core*.wasm.js — the worker picks the
+      // right SIMD variant at runtime.
+      corePath: `${LOCAL_BASE}/`,
+      // Directory containing {eng,bul}.traineddata.gz.
+      langPath: `${LOCAL_BASE}/lang`,
+    });
+  } catch (err) {
+    if (!warnedLocalFallback) {
+      warnedLocalFallback = true;
+      // eslint-disable-next-line no-console
+      console.warn(
+        '[ocr] Local Tesseract assets under /tesseract not found or failed to ' +
+          'load; falling back to the CDN. Run `npm run vendor:ocr-lang` and ' +
+          '`npm run vendor:ocr-core` to vendor them for offline use.',
+        err,
+      );
+    }
+    // Default paths -> CDN (cdn.jsdelivr.net + tessdata.projectnaptha.com).
+    return createWorker(language);
+  }
+}
+
+/**
  * Run OCR on each page of the PDF using tesseract.js, then bake the extracted
  * word list as an invisible (opacity=0) text overlay via pdf-lib so the
  * resulting PDF is searchable / selectable.
  *
- * Note: the first run downloads the Tesseract language traineddata (~15 MB per
- * language). Subsequent runs are cached by the browser.
+ * Note: OCR prefers the locally vendored language traineddata under
+ * `public/tesseract/lang` (~15 MB per language). If it isn't vendored, the first
+ * run downloads it from the CDN and the browser caches it for subsequent runs.
+ * See BUILD.md → "Vendoring OCR models".
  */
 export async function ocrProcessor(
   ctx: ProcessorContext,
@@ -26,7 +78,7 @@ export async function ocrProcessor(
   const { PDFDocument } = await import('pdf-lib');
   const { createWorker } = await import('tesseract.js');
 
-  const worker = await createWorker(opts.language);
+  const worker = await createOcrWorker(createWorker, opts.language);
   try {
     const doc = await PDFDocument.load(file.arrayBuffer.slice(0));
     const font = await embedStandardFont(doc);
