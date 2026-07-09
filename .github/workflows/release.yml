@@ -84,7 +84,7 @@ jobs:
         run: npx @tauri-apps/cli icon src-tauri/icons/icon.png
 
       - name: Build & release
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # NOTE: macOS/Windows builds are intentionally UNSIGNED for now (no paid
