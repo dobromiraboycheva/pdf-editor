@@ -47,7 +47,7 @@
     "react-dropzone": "^14.2.3",
     "react-i18next": "^17.0.8",
     "react-konva": "^18.2.16",
-    "react-router-dom": "^6.26.1",
+    "react-router-dom": "^7.18.1",
     "tailwind-merge": "^2.5.2",
     "tesseract.js": "^7.0.0",
     "zustand": "^4.5.5"
